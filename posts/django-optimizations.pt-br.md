@@ -1,18 +1,18 @@
-# Maneiras de otimizar queries no Django 🐍🚀
+## Maneiras de otimizar queries no Django 🐍🚀
 
 Podemos tornar nossas operações mais performáticas utilizando métodos do próprio Django, geralmente os atrasos em requisições são consequências de múltiplos JOINS realizados nas queries, frutos de relações entre os modelos.
 
-## 1. Utilizando `prefetch_related()` e `select_related()`
+### 1. Utilizando `prefetch_related()` e `select_related()`
 
 Quando definimos o ***queryset*** de uma ***view*** podemos realizar os ***JOINS*** de forma prévia dentro da mesma. Assim, reduzimos o número de operações que vão ser realizadas posteriormente. 
 
 **Exemplo:** Dentro do ***serializer*** utilizado pela ***view*** precisamos de dados de entidades relacionadas com o modelo, para preencher um campo por exemplo. Assim para cada instância que será serializada, um conjunto de operações será realizada para trazer este dado. Ao realizar estas operações na ***view*** no momento de definir o ***queryset***, todas as operações serão feitas em uma única tacada, levando os dados para serem apenas serializados.
 
-### `select_related()`: Utilizado para relações 1 para 1 `OneToOneField` ou chaves estrangeiras `ForeignKey`.
+**`select_related()`**: Utilizado para relações 1 para 1 `OneToOneField` ou chaves estrangeiras `ForeignKey`.
 
-### `prefetch_related()`: Utilizando para relações onde vamos ter vários objetos, como `ManyToManyField` ou em acessos reversos de chaves estrangeiras.
+**`prefetch_related()`**: Utilizando para relações onde vamos ter vários objetos, como `ManyToManyField` ou em acessos reversos de chaves estrangeiras.
 
-### Exemplo:
+**Exemplo:**
 
 ```python
 # models.py
@@ -28,7 +28,7 @@ class Employee(models.Model):
 	company = models.ForeignKey(Company, on_delete=models.PROTECT, blank=True, null=True)
 ```
 
-### No serializer da entidade `Employee` nós buscamos o *name* de `Company` através da *FK*, cada vez que este *serializer* receber uma instância para *serializar*, ele vai fazer um *JOIN* com `Company` para buscar o dado.
+No serializer da entidade `Employee` nós buscamos o *name* de `Company` através da *FK*, cada vez que este *serializer* receber uma instância para *serializar*, ele vai fazer um *JOIN* com `Company` para buscar o dado.
 
 ```python
 # serializers.py
@@ -45,7 +45,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 		]
 ```
 
-### Na *view* da entidade `Employee` nós usamos o `select_related()` passando o campo da *FK* para `Company`, assim é realizado um *INNER JOIN* no *queryset*, sem necessidade de ser realizado individualmente no serializer.
+Na *view* da entidade `Employee` nós usamos o `select_related()` passando o campo da *FK* para `Company`, assim é realizado um *INNER JOIN* no *queryset*, sem necessidade de ser realizado individualmente no serializer.
 
 ```python
 # views.py
@@ -54,15 +54,15 @@ class EmployeeViewSet(ModelViewSet):
 	queryset = Employee.objects.select_related('company').order_by('pk')
 ```
 
-### Já com o `prefetch_related()` podemos fazer isso quando a relação for maior.
+Já com o `prefetch_related()` podemos fazer isso quando a relação for maior.
 
-**Neste caso foi passado como parâmetro `employee_set`  (ou o nome que estivesse definido no `related_name` da FK), relacionando os `Employees` de cada `Company`.**
+Neste caso foi passado como parâmetro `employee_set`  (ou o nome que estivesse definido no `related_name` da FK), relacionando os `Employees` de cada `Company`.
 
 ```python
 queryset = Company.objects.prefetch_related('employee_set').order_by('pk')
 ```
 
-### Exemplo prático:
+**Exemplo prático:**
 
 ```python
 queryset = Order.objects.select_related(
@@ -78,17 +78,17 @@ queryset = Order.objects.select_related(
                                 .order_by('pk')
 ```
 
-**Na entidade `Order` estamos realizando o *JOIN* com suas chaves estrangeiras `[’contract’, ‘interest’, ‘company’, ‘owner’]`, e um `prefetch_related()` com diversas instâncias acessadas através dos lookups `‘__’` de campos do Django.** 
+Na entidade `Order` estamos realizando o *JOIN* com suas chaves estrangeiras `[’contract’, ‘interest’, ‘company’, ‘owner’]`, e um `prefetch_related()` com diversas instâncias acessadas através dos lookups `‘__’` de campos do Django.
 
-## 2. Evitando loops e usando métodos como `aggregate()` e `update()`
+### 2. Evitando loops e usando métodos como `aggregate()` e `update()`
 
 Podemos evitar a construção de loops utilizando algumas alternativas, dependendo do contexto.
 
-### `aggregate()`
+**`aggregate()`**
 
-**Insere um campo no *queryset* e retorna por fim um dicionário `(dict)`.**
+Insere um campo no *queryset* e retorna por fim um dicionário `(dict)`.
 
-### Exemplo:
+**Exemplo:**
 
 - Utilizando `loop`
     
@@ -111,9 +111,9 @@ Podemos evitar a construção de loops utilizando algumas alternativas, dependen
     ```
     
 
-### Ambas as formas estão iterando sobre os objetos da entidade Item e somando o seu campo price, porém utilizando o `aggregate` estamos realizando uma operação mais performática devido a vários motivos do Django e também de otimizações do banco de dados.
+Ambas as formas estão iterando sobre os objetos da entidade Item e somando o seu campo price, porém utilizando o `aggregate` estamos realizando uma operação mais performática devido a vários motivos do Django e também de otimizações do banco de dados.
 
-### Exemplo prático:
+**Exemplo prático:**
 
 ```python
 # serializers.py
@@ -133,13 +133,13 @@ def get_contract_price(self, obj):
 	return price
 ```
 
-**Aqui estamos filtrando um conjunto de objetos, logo após estamos agregando no novo campo `total_price` os valores do campo `price` que é presente no objeto da chave primária  do campo `item`. Realizamos a agregação com o operador `Sum()` e o operador `F()`, o `F()` converte um campo para ser utilizado em operações.**
+Aqui estamos filtrando um conjunto de objetos, logo após estamos agregando no novo campo `total_price` os valores do campo `price` que é presente no objeto da chave primária  do campo `item`. Realizamos a agregação com o operador `Sum()` e o operador `F()`, o `F()` converte um campo para ser utilizado em operações.
 
-### `update()`
+**`update()`**
 
-### Da mesma forma que o `aggregate` é mais performático do que os loops, realizar algumas alterações utilizando o `update()` se torna mais performático do que alterar na instância do objeto.
+Da mesma forma que o `aggregate` é mais performático do que os loops, realizar algumas alterações utilizando o `update()` se torna mais performático do que alterar na instância do objeto.
 
-### Exemplo:
+**Exemplo:**
 
 - Acessando o campo
 
@@ -169,13 +169,13 @@ items.filter(pk__in=[15, 16, 17]).update(name='Teste')
 items.filter(category='technology').update(category='tech')
 ```
 
-### Ambas as maneiras estão atualizando o campo `name` do item com `pk=15`, porém a segunda se torna mais performática para atualizações em grande escala ou que não precisam acessar diretamente o campo. Já o primeiro modo é mais necessário quando precisamos performar algum cálculo ou lógica.
+Ambas as maneiras estão atualizando o campo `name` do item com `pk=15`, porém a segunda se torna mais performática para atualizações em grande escala ou que não precisam acessar diretamente o campo. Já o primeiro modo é mais necessário quando precisamos performar algum cálculo ou lógica.
 
-## 3. Criando um `serializer` para cada contexto específico
+### 3. Criando um `serializer` para cada contexto específico
 
-**Caso uma `view` não vá utilizar todos os campos de um modelo ou você precise *serializar* um objeto dentro de outro `serializer`,  e esses campos demandam algum esforço para serem *serializados*, vale a pena criar um `serializer` específico do modelo para a `view`, utilizando apenas o que você vai precisar.**
+Caso uma `view` não vá utilizar todos os campos de um modelo ou você precise *serializar* um objeto dentro de outro `serializer`,  e esses campos demandam algum esforço para serem *serializados*, vale a pena criar um `serializer` específico do modelo para a `view`, utilizando apenas o que você vai precisar.
 
-### Exemplo:
+**Exemplo:**
 
 ```python
 class ProductSerializer(serializers.ModelSerializer):
@@ -224,4 +224,4 @@ class ComplexProductSerializer(serializers.ModelSerializer):
 		]
 ```
 
-### `Product` contém vários serializers com objetivos claramente definidos, é perceptível que o último `(ComplexProductSerializer)` gera um alto volume de dados, tornando-o menos performático, então em uma situação onde eu preciso apenas do básico, posso utilizar algum existente ou criar um novo com os campos necessários.
+`Product` contém vários serializers com objetivos claramente definidos, é perceptível que o último `(ComplexProductSerializer)` gera um alto volume de dados, tornando-o menos performático, então em uma situação onde eu preciso apenas do básico, posso utilizar algum existente ou criar um novo com os campos necessários.
