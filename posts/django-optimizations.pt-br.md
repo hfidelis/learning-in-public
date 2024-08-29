@@ -1,16 +1,16 @@
-# Maneiras de otimizar queries com Django
+# Maneiras de otimizar queries no Django 🐍🚀
 
-Podemos tornar nossas operações mais performáticas utilizando métodos do próprio Django, geralmente os atraso são consequências de múltiplos JOINS realizados nas queries, frutos de relações entre os modelos.
+Podemos tornar nossas operações mais performáticas utilizando métodos do próprio Django, geralmente os atrasos em requisições são consequências de múltiplos JOINS realizados nas queries, frutos de relações entre os modelos.
 
-## Utilizando `prefetch_related()` e `select_related()`
+## 1. Utilizando `prefetch_related()` e `select_related()`
 
 Quando definimos o ***queryset*** de uma ***view*** podemos realizar os ***JOINS*** de forma prévia dentro da mesma. Assim, reduzimos o número de operações que vão ser realizadas posteriormente. 
 
 **Exemplo:** Dentro do ***serializer*** utilizado pela ***view*** precisamos de dados de entidades relacionadas com o modelo, para preencher um campo por exemplo. Assim para cada instância que será serializada, um conjunto de operações será realizada para trazer este dado. Ao realizar estas operações na ***view*** no momento de definir o ***queryset***, todas as operações serão feitas em uma única tacada, levando os dados para serem apenas serializados.
 
-### `select_related()`: Utilizado para relações 1 para 1 OneToOneField ou chaves estrangeiras ForeignKey.
+### `select_related()`: Utilizado para relações 1 para 1 `OneToOneField` ou chaves estrangeiras `ForeignKey`.
 
-### `prefetch_related()`: Utilizando para relações onde vamos ter vários objetos, como ManyToManyField ou em acessos reversos de chaves estrangeiras.
+### `prefetch_related()`: Utilizando para relações onde vamos ter vários objetos, como `ManyToManyField` ou em acessos reversos de chaves estrangeiras.
 
 ### Exemplo:
 
@@ -62,25 +62,25 @@ class EmployeeViewSet(ModelViewSet):
 queryset = Company.objects.prefetch_related('employee_set').order_by('pk')
 ```
 
-## Exemplo real:
+### Exemplo prático:
 
 ```python
 queryset = Order.objects.select_related(
-                                    'contract',
-                                    'interest',
+                                    'responsible',
+                                    'client',
                                     'company',
-                                    'owner',
+                                    'unit',
                                 ) \
                                 .prefetch_related(
-                                    'commitments__items__item',
-                                    'contract__items',
+                                    'contract__products',
+                                    'contract__participants',
                                 ) \
                                 .order_by('pk')
 ```
 
 **Na entidade `Order` estamos realizando o *JOIN* com suas chaves estrangeiras `[’contract’, ‘interest’, ‘company’, ‘owner’]`, e um `prefetch_related()` com diversas instâncias acessadas através dos lookups `‘__’` de campos do Django.** 
 
-## Evitando loops e usando métodos como `aggregate()` e `update(`)
+## 2. Evitando loops e usando métodos como `aggregate()` e `update()`
 
 Podemos evitar a construção de loops utilizando algumas alternativas, dependendo do contexto.
 
@@ -113,30 +113,24 @@ Podemos evitar a construção de loops utilizando algumas alternativas, dependen
 
 ### Ambas as formas estão iterando sobre os objetos da entidade Item e somando o seu campo price, porém utilizando o `aggregate` estamos realizando uma operação mais performática devido a vários motivos do Django e também de otimizações do banco de dados.
 
-### Exemplo real:
+### Exemplo prático:
 
 ```python
 # serializers.py
 
-price_commitment = serializers.SerializerMethodField()
+contract_price = serializers.SerializerMethodField()
 
-def get_price_commitment(self, obj):
-        price = OrderCommitmentItem.objects \
-                                    .filter(
-                                        item__contract=obj.contract,
-                                        item__type__in=[
-                                            'unit',
-                                            'compound'
-                                        ]
-                                    ) \
-                                    .aggregate(
-                                        total_price=Sum(
-                                            F('item__price') * F('quantity')
-                                        )
-                                    ) \
-                                    .get('total_price', 0)
+def get_contract_price(self, obj):
+	ALLOWED_TYPES = ['product', 'service']
 
-        return price
+	price = Product.objects.filter(
+                                contract=obj.id,
+                                item__type__in=ALLOWED_TYPES
+                            ).aggregate(
+                                total_price=Sum(F('price') * F('quantity'))
+                            ).get('total_price', 0)
+
+	return price
 ```
 
 **Aqui estamos filtrando um conjunto de objetos, logo após estamos agregando no novo campo `total_price` os valores do campo `price` que é presente no objeto da chave primária  do campo `item`. Realizamos a agregação com o operador `Sum()` e o operador `F()`, o `F()` converte um campo para ser utilizado em operações.**
@@ -162,12 +156,22 @@ my_item.save()
 ```python
 items = Items.objects.all()
 
+# 1. Atualizando um único objeto
+
 items.filter(pk=15).update(name='Teste')
+
+# 2. Atualizando múltiplos objetos
+
+# Passando uma lista de PKs
+items.filter(pk__in=[15, 16, 17]).update(name='Teste')
+
+# Atualizando todos os objetos por meio de um filtro
+items.filter(category='technology').update(category='tech')
 ```
 
 ### Ambas as maneiras estão atualizando o campo `name` do item com `pk=15`, porém a segunda se torna mais performática para atualizações em grande escala ou que não precisam acessar diretamente o campo. Já o primeiro modo é mais necessário quando precisamos performar algum cálculo ou lógica.
 
-### Criando um `serializer` para cada contexto específico
+## 3. Criando um `serializer` para cada contexto específico
 
 **Caso uma `view` não vá utilizar todos os campos de um modelo ou você precise *serializar* um objeto dentro de outro `serializer`,  e esses campos demandam algum esforço para serem *serializados*, vale a pena criar um `serializer` específico do modelo para a `view`, utilizando apenas o que você vai precisar.**
 

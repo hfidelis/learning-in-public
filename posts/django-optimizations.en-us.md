@@ -1,16 +1,16 @@
-# Ways to improve query optimization in Django
+# Ways to optimize queries in Django 🐍🚀
 
 We can make our operations more performant using Django's own methods, generally request delays are consequence from multiple JOINS performed inside queries, result from model's relationships.
 
-## Using `prefetch_related()` and `select_related()`
+## 1. Using `prefetch_related()` and `select_related()`
 
 When we define the ***queryset*** of a ***view*** we can perform ***JOINS*** in advance within it. Thus, we reduce the number of operations that will be realized later.
 
 **Example:** Within the ***serializer*** used by ***view*** we need data from some entity related to the model, to fill in a field for example. So for each instance that will be serialized, a set of operations will be performed to bring this data. When performing these operations in ***view*** when defining the ***queryset***, all operations will be done in a single shot, carrying all needed data to serializer.
 
-### `select_related()`: Used for 1-to-1 OneToOneField relationships or ForeignKey foreign keys.
+### `select_related()`: Used for 1-to-1 `OneToOneField` or `ForeignKey` relationships.
 
-### `prefetch_related()`: Using for relationships where we will have several objects, such as ManyToManyField or reverse ForeignKey accesses.
+### `prefetch_related()`: Using for relationships where we will have several objects, such as `ManyToManyField` or reverse `ForeignKey` accesses.
 
 ### Example:
 
@@ -62,25 +62,25 @@ class EmployeeViewSet(ModelViewSet):
 queryset = Company.objects.prefetch_related('employee_set').order_by('pk')
 ```
 
-## Real World Example:
+### Practical Example:
 
 ```python
 queryset = Order.objects.select_related(
-                                    'contract',
-                                    'interest',
+                                    'responsible',
+                                    'client',
                                     'company',
-                                    'owner',
+                                    'unit',
                                 ) \
                                 .prefetch_related(
-                                    'commitments__items__item',
-                                    'contract__items',
+                                    'contract__products',
+                                    'contract__participants',
                                 ) \
                                 .order_by('pk')
 ```
 
 **In the `Order` entity we are performing the *JOIN* with its foreign keys `['contract', 'interest', 'company', 'owner']`, and a `prefetch_related()` with several instances accessed through the `'__'` lookups of Django fields.**
 
-## Avoiding loops and using methods like `aggregate()` and `update()`
+## 2. Avoiding loops and using methods like `aggregate()` and `update()`
 
 We can avoid building loops using some alternatives, depending on the context.
 
@@ -112,30 +112,24 @@ We can avoid building loops using some alternatives, depending on the context.
 
 ### Both ways are iterating over the objects from Item entity and adding their price field, however using `aggregate` we are performing a more performant operation due to several Django reasons and also database optimizations.
 
-### Real World Example:
+### Practical Example:
 
 ```python
 # serializers.py
 
-price_commitment = serializers.SerializerMethodField()
+contract_price = serializers.SerializerMethodField()
 
-def get_price_commitment(self, obj):
-        price = OrderCommitmentItem.objects \
-                                    .filter(
-                                        item__contract=obj.contract,
-                                        item__type__in=[
-                                            'unit',
-                                            'compound'
-                                        ]
-                                    ) \
-                                    .aggregate(
-                                        total_price=Sum(
-                                            F('item__price') * F('quantity')
-                                        )
-                                    ) \
-                                    .get('total_price', 0)
+def get_contract_price(self, obj):
+	ALLOWED_TYPES = ['product', 'service']
 
-        return price
+	price = Product.objects.filter(
+                                contract=obj.id,
+                                item__type__in=ALLOWED_TYPES
+                            ).aggregate(
+                                total_price=Sum(F('price') * F('quantity'))
+                            ).get('total_price', 0)
+
+	return price
 ```
 
 **Here we are filtering a set of objects, then we are aggregating in the new field `total_price` the values ​from `price` field that is present in the primary key object of the `item` field. We perform aggregation with the `Sum()` operator and the `F()` operator, `F()` converts a field to be used in operations.**
@@ -161,12 +155,22 @@ my_item.save()
 ```python
 items = Items.objects.all()
 
+# 1. Updating a single item
+
 items.filter(pk=15).update(name='Teste')
+
+# 2. Updating multiple items
+
+# By passing a list of primary keys
+items.filter(pk__in=[15, 16, 17]).update(name='Teste')
+
+# By passing a filter
+items.filter(category='technology').update(category='tech')
 ```
 
 ### Both ways are updating the item's `name` field with `pk=15`, but the second becomes more performant for bulk updates or when we don't need to directly access the field. The first mode is more necessary when we need to perform some calc or logic.
 
-### Creating a `serializer` for each specific context
+## 3. Creating a `serializer` for each specific context
 
 **If a `view` will not use all the fields from a model or you need to *serialize* an object within another `serializer`, and these fields require some effort to be *serialized*, it is worth creating a `serializer ` model-specific ` view `, using only what you will need.**
 
